@@ -2,24 +2,55 @@ from datetime import datetime
 import re
 
 
-def format_float(str_value):
+def format_float(valor, fora_extract=False):
+    if not fora_extract:
+        valor = valor.text()
     try:
-        novo_valor = float(str_value.text().replace('.', '').replace(',', '.'))
-    except Exception:
-        novo_valor = str_value.text()
-    return novo_valor
+        return float(valor.replace('.', '').replace(',', '.'))
+    except ValueError:
+        return valor
+
+
+def formata_produto(lista_produtos):
+    lista_produtos_filtrados = filtro(lista_produtos)
+
+    def formatar_quant_faturada(valor):
+        if len(valor.split()) == 2:
+            return valor.split()[1]
+        elif remove_mes_ano_in_qtd_faturada(valor):
+            return ''
+        return valor
+
+    nova_lista = [
+        {
+            chave: format_float(valor, fora_extract=True) if chave not in ['codigo', 'produto', 'mes_ref', 'unid_med']
+            else valor
+            for chave, valor in produto.items()
+        }
+        for produto in lista_produtos_filtrados
+    ]
+
+    for produto in nova_lista:
+        produto['quant_faturada'] = formatar_quant_faturada(produto['quant_faturada'])
+        remover_chaves_vazias(produto)
+    return nova_lista
+
+
+def remove_mes_ano_in_qtd_faturada(texto):
+    padrao = r"\b[A-Z][A-Za-z]{2}/\d{2}\b"
+    resultado = re.sub(padrao, '', texto)
+    if resultado == '':
+        return True
+    return False
 
 
 def format_date(date, fora_do_extract=False):
     if not fora_do_extract:
-        try:
-            new_date = datetime.strptime(date.text(), "%d/%m/%Y")
-        except Exception:
-            new_date = date
-        return new_date
-
-    new_date = datetime.strptime(date, "%d/%m/%Y")
-    return new_date
+        date = date.text()
+    try:
+        return datetime.strptime(date, "%d/%m/%Y")
+    except ValueError:
+        return date
 
 
 # serializa a data
@@ -34,105 +65,72 @@ def remover_chaves_vazias(dicionario):
         dicionario.pop(chave)
 
 
-def tem_codigo_indesejado(dicionario):
-    codigo = dicionario.get("codigo")
-    return codigo in ["Tota", "DÉBI"]
-
-
 def filtro(lista):
+    def tem_codigo_indesejado(dicionario):
+        codigo = dicionario.get("codigo")
+        return codigo in ["Tota", "DÉBI", "CRÉD"]
+
     lista_filtrada = [d for d in lista if not tem_codigo_indesejado(d)]
     return lista_filtrada
 
 
 def formata_historico(data):
-    lista_nova = list()
     for historico in data:
         for chave, valor in historico.items():
             try:
                 historico[chave] = int(valor)
-            except Exception:
+            except ValueError:
                 pass
+
             if chave in ['dias', 'kWh']:
-                if len(valor.split()) == 2:
-                    historico[chave] = valor.split()[0]
+                partes = valor.split()
+                if len(partes) == 2:
+                    historico[chave] = partes[0]
+
             if chave == 'mes':
-                if 'l' in valor:
-                    historico['mes'] = historico['mes'].replace('l', '')
-        lista_nova.append(historico)
-    return lista_nova
+                historico['mes'] = valor.replace('l', '')
+    return data
 
 
 def formata_leitura(data):
-    lista_nova = list()
+    lista_nova = []
     for leitura in data:
         for chave, valor in leitura.items():
-            if chave in ['leitura_prox_mes']:
+            if chave == 'leitura_prox_mes':
                 try:
                     leitura[chave] = format_date(valor, fora_do_extract=True)
-                except Exception:
-                    pass
-        remover_chaves_vazias(leitura)
+                except ValueError:
+                    leitura[chave] = valor
+
+        leitura = {chave: valor for chave, valor in leitura.items() if valor}
         lista_nova.append(leitura)
     return lista_nova
 
 
-def formata_produto(lista_produtos):
-    lista_produtos = filtro(lista_produtos)
-    nova_lista = list()
-    for produto in lista_produtos:
-        for chave, valor in produto.items():
-            if chave == 'quant_faturada':
-                if len(valor.split()) == 2:
-                    produto[chave] = valor.split()[1]
-                if remove_mes_ano_in_qtd_faturada(valor):
-                    produto[chave] = ''
-            try:
-                if chave in ['codigo', 'produto', 'mes_ref', 'unid_med']:
-                    continue
-                produto[chave] = float(valor.replace('.', '').replace(',', '.'))
-            except Exception:
-                pass
-        remover_chaves_vazias(dicionario=produto)
-        nova_lista.append(produto)
-    return nova_lista
-
-
-def remove_mes_ano_in_qtd_faturada(texto):
-    padrao = r"\b[A-Z][A-Za-z]{2}/\d{2}\b"
-    resultado = re.sub(padrao, '', texto)
-    if resultado == '':
-        return True
-    return False
-
-
 def format_outros(data):
-    # format debitos antigos
-    debitos = data['debitos_antigos']
+    debitos_antigos = data['debitos_antigos']
+    remover_chaves_vazias(debitos_antigos)
 
-    remover_chaves_vazias(debitos)
-    if len(debitos) == 0:
-        debitos = False
-    else:
+    if debitos_antigos:
         try:
-            vencimento = debitos['vencimento']
-            valor = debitos['valor']
+            vencimento = debitos_antigos.get('vencimento')
+            valor = debitos_antigos.get('valor')
 
-            debitos['vencimento'] = format_date(vencimento, fora_do_extract=True)
-            debitos['valor'] = float(valor.replace('.', '').replace(',', '.'))
-        except Exception:
+            debitos_antigos['vencimento'] = format_date(vencimento, fora_do_extract=True)
+            debitos_antigos['valor'] = format_float(valor=valor, fora_extract=True)
+        except KeyError:
             pass
-    data['debitos_antigos'] = debitos
+    else:
+        debitos_antigos = False
+    data['debitos_antigos'] = debitos_antigos
 
-    # format outros
-    for chave, valor in data.items():
-        if chave == 'total_pagar':
-            try:
-                data[chave] = float(valor.replace('.', '').replace(',', '.'))
-            except Exception:
-                pass
-        elif chave == 'data_vencimento':
-            try:
-                data[chave] = format_date(valor, fora_do_extract=True)
-            except Exception:
-                pass
+    # Formatar outros campos
+    try:
+        total_pagar = data.get('total_pagar')
+        data_vencimento = data.get('data_vencimento')
+
+        data['total_pagar'] = format_float(valor=total_pagar, fora_extract=True)
+        data['data_vencimento'] = format_date(data_vencimento, fora_do_extract=True)
+    except KeyError:
+        pass
     return data
