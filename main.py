@@ -9,7 +9,8 @@ from utils import format_date, \
                     formata_historico, \
                     formata_produto, \
                     formata_leitura, \
-                    remover_chaves_vazias
+                    remover_chaves_vazias, \
+                    format_outros
 
 
 faturas = glob.glob('./faturas/' + "*.pdf")
@@ -58,7 +59,7 @@ for i, fatura in enumerate(faturas):
             format,
             ('mês_de_referência', f'{get}("302.95, 540.101, 343.477, 549.101")'),
             ('valor_total', f'{get}("467.191, 540.101, 526.753, 549.101")', format_float),
-            ('vencimento', f'{get}("380.017, 540.101, 424.981, 549.101")')
+            ('vencimento', f'{get}("380.017, 540.101, 424.981, 549.101")', format_date)
         ])
 
     schema['fatura']['nota_fiscal'] = pdf.extract([
@@ -230,8 +231,10 @@ for i, fatura in enumerate(faturas):
             parent,
             format,
             ('vencimento', f'{get}("51.0, 160.539, 118.942, 166.039")', lambda texto: texto.text()[:10]),
-            ('valor', f'{get}("51.0, 160.539, 118.942, 166.039")', lambda texto: texto.text()[10:]),
+            ('valor', f'{get}("51.0, 160.539, 118.942, 166.039")', lambda texto: texto.text()[14:]),
     ])
+    schema['outros'] = format_outros(schema['outros'])
+
 
     json_data = json.dumps(schema, indent=4, ensure_ascii=False, default=date_obj_json)  # noqa
     with open(f"./json/{pdf_name}.json", "w", encoding='utf-8') as arquivo:

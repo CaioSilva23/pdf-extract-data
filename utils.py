@@ -48,6 +48,10 @@ def formata_historico(data):
     lista_nova = list()
     for historico in data:
         for chave, valor in historico.items():
+            try:
+                historico[chave] = int(valor)
+            except Exception:
+                pass
             if chave in ['dias', 'kWh']:
                 if len(valor.split()) == 2:
                     historico[chave] = valor.split()[0]
@@ -99,3 +103,36 @@ def remove_mes_ano_in_qtd_faturada(texto):
     if resultado == '':
         return True
     return False
+
+
+def format_outros(data):
+    # format debitos antigos
+    debitos = data['debitos_antigos']
+
+    remover_chaves_vazias(debitos)
+    if len(debitos) == 0:
+        debitos = False
+    else:
+        try:
+            vencimento = debitos['vencimento']
+            valor = debitos['valor']
+
+            debitos['vencimento'] = format_date(vencimento, fora_do_extract=True)
+            debitos['valor'] = float(valor.replace('.', '').replace(',', '.'))
+        except Exception:
+            pass
+    data['debitos_antigos'] = debitos
+
+    # format outros
+    for chave, valor in data.items():
+        if chave == 'total_pagar':
+            try:
+                data[chave] = float(valor.replace('.', '').replace(',', '.'))
+            except Exception:
+                pass
+        elif chave == 'data_vencimento':
+            try:
+                data[chave] = format_date(valor, fora_do_extract=True)
+            except Exception:
+                pass
+    return data
