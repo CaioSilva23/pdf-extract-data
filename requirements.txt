@@ -1,0 +1,13 @@
+cffi==1.15.1
+chardet==5.2.0
+charset-normalizer==3.2.0
+cryptography==41.0.3
+cssselect==1.2.0
+lxml==4.9.3
+pdfminer.six==20221105
+pdfquery==0.4.3
+pycparser==2.21
+PyPDF2==3.0.1
+pyquery==2.0.0
+roman==4.1
+six==1.16.0
