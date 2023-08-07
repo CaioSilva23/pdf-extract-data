@@ -134,3 +134,11 @@ def format_outros(data):
     except KeyError:
         pass
     return data
+
+
+def format_fatura(data):
+    for chave, valor in data.items():
+        str = chave[0:4]
+        if str == 'data':
+            data[chave] = format_date(date=valor, fora_do_extract=True)
+    return data

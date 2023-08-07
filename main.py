@@ -10,51 +10,39 @@ from utils import format_date, \
                     formata_produto, \
                     formata_leitura, \
                     remover_chaves_vazias, \
-                    format_outros
+                    format_outros, \
+                    format_fatura
+
+UNIDADE_CONSUMIDORA = "unidade_consumidora"
+FATURA = "fatura"
+LEITURAS = "leituras"
+PRODUTOS = "produtos"
+BANDEIRAS = "bandeiras"
+SALDOS_GERACAO = "saldos_geracao"
+HISTORICO = "historico"
+OUTROS = "outros"
 
 
-faturas = glob.glob('./faturas/' + "*.pdf")
-for i, fatura in enumerate(faturas):
-    print(f'Processando: {i+1}', end='\r')
-    pdf = pdfquery.PDFQuery(fatura)
-    pdf_name = os.path.basename(fatura)[0:-4]
-    pdf_pages = PyPDF2.PdfReader(fatura)
+def extrair_dados_unidade_consumidora(pdf, get, format, parent):
+    obj = pdf.extract([
+            parent,
+            format,
 
-    schema = {
-        "unidade_consumidora": {},
-        "fatura": {},
-        "leituras": {},
-        "produtos": {},
-        "bandeiras": {},
-        "saldos_geracao": {},
-        "historico": {},
-        "outros": {}
-    }
+            ('nome', f'{get}("76.55, 756.112, 175.614, 764.112")'),
+            ('cpf/cnpj', f'{get}("303.3, 590.94, 370.477, 596.44")', lambda match: match.text()[6:]),
+            ('logradouro', f'{get}("51.0, 584.94, 134.446, 590.44")'),
+            ('bairro', f'{get}("51.0, 578.94, 92.283, 584.44")'),
+            ('cidade', f'{get}("51.0, 572.94, 133.489, 578.44")', lambda match: match.text()[10:-5]),
+            ('estado', f'{get}("51.0, 572.94, 133.489, 578.44")', lambda match: match.text()[-2:]),
+            ('cep', f'{get}("51.0, 572.94, 133.489, 578.44")', lambda match: match.text()[:9]),
+            ('classificação', f'{get}("303.3, 578.94, 537.154, 584.44")', lambda match: match.text()[15:]),
+        ])
+    return obj
 
-    # tools
-    get = 'LTTextLineHorizontal:overlaps_bbox'
-    parent = ('with_parent', 'LTPage[pageid="1"]')
-    format = ('with_formatter', 'text')
 
-    # dados unidade consumidora
-    schema['unidade_consumidora'] = pdf.extract([
-        parent,
-        format,
-
-        ('nome', f'{get}("76.55, 756.112, 175.614, 764.112")'),
-        ('cpf/cnpj', f'{get}("303.3, 590.94, 370.477, 596.44")', lambda match: match.text()[6:]),
-        ('logradouro', f'{get}("51.0, 584.94, 134.446, 590.44")'),
-        ('bairro', f'{get}("51.0, 578.94, 92.283, 584.44")'),
-        ('cidade', f'{get}("51.0, 572.94, 133.489, 578.44")', lambda match: match.text()[10:-5]),
-        ('estado', f'{get}("51.0, 572.94, 133.489, 578.44")', lambda match: match.text()[-2:]),
-        ('cep', f'{get}("51.0, 572.94, 133.489, 578.44")', lambda match: match.text()[:9]),
-        ('classificação', f'{get}("303.3, 578.94, 537.154, 584.44")', lambda match: match.text()[15:]),
-    ])
-    # fim dados unidade consumidora
-
-    # dados fatura
+def extrair_dados_fatura(pdf, get, format, parent, pdf_pages):
     for page in range(len(pdf_pages.pages)):
-        schema['fatura'] = pdf.extract([
+        fatura = pdf.extract([
             ('with_parent', f'LTPage[pageid="{page + 1}"]'),
             format,
             ('mês_de_referência', f'{get}("302.95, 540.101, 343.477, 549.101")'),
@@ -62,7 +50,7 @@ for i, fatura in enumerate(faturas):
             ('vencimento', f'{get}("380.017, 540.101, 424.981, 549.101")', format_date)
         ])
 
-    schema['fatura']['nota_fiscal'] = pdf.extract([
+    fatura['nota_fiscal'] = pdf.extract([
         parent,
         format,
 
@@ -75,18 +63,15 @@ for i, fatura in enumerate(faturas):
         ('data_leitura_proximo_mes', f'{get}("379.85, 714.423, 487.804, 721.423")', lambda match: match.text()[21:]),
     ])
 
-    for chave, valor in schema['fatura']['nota_fiscal'].items():
-        str = chave[0:4]
-        if str == 'data':
-            schema['fatura']['nota_fiscal'][chave] = format_date(date=valor, fora_do_extract=True)
-    # fim dados fatura
+    fatura['nota_fiscal'] = format_fatura(data=fatura['nota_fiscal'])
+    return fatura
 
-    # dados leitura
+
+def extrair_dados_leituras(pdf, get, parent, format):
     list_leituras = list()
     y0_leitura, y1_leitura = 338.645, 343.645
-    altura_leitura = y1_leitura - y0_leitura  # 4,5
+    altura_leitura = y1_leitura - y0_leitura
     ajuste = 2
-
     while True:
         obj = pdf.extract([
             parent,
@@ -103,13 +88,15 @@ for i, fatura in enumerate(faturas):
         linha_vazia = not any([val != "" for val in obj.values()])
         if linha_vazia:
             break
-        y0_leitura = y0_leitura - altura_leitura - ajuste  # 482,2
+        y0_leitura = y0_leitura - altura_leitura - ajuste
         y1_leitura = y1_leitura - altura_leitura - ajuste
         list_leituras.append(obj)
-    schema['leituras'] = formata_leitura(list_leituras)
-    # dados produtos
+    return formata_leitura(list_leituras)
 
-    schema['produtos']['gerais'] = pdf.extract([
+
+def extrair_dados_produtos(pdf, get, parent, format, pdf_pages):
+    dict_prod = dict()
+    dict_prod['gerais'] = pdf.extract([
         parent,
         format,
         ('operacao', f'{get}("101.6, 502.895, 141.95, 507.895")', lambda match: int(match.text()[2:])),
@@ -148,53 +135,56 @@ for i, fatura in enumerate(faturas):
             y0_prod = y0_prod - altura_prod - ajuste
             y1_prod = y1_prod - altura_prod - ajuste
             list_produtos.append(obj)
-    schema['produtos']['lista'] = formata_produto(lista_produtos=list_produtos)
+    dict_prod['lista'] = formata_produto(list_produtos)
+    return dict_prod
 
-    # bandeiras
-    schema['bandeiras']['1'] = pdf.extract([
+
+def extrair_dados_bandeiras(pdf, get, parent, format):
+    dict_obj = dict()
+    dict_obj['1'] = pdf.extract([
         parent,
         format,
-
         ('bandeira', f'{get}("522.4, 487.901, 539.131, 492.401")'),
         ('dias', f'{get}("523.15, 481.25, 538.383, 485.75")', lambda match: match.text()[:-4]),
     ])
 
-    schema['bandeiras']['2'] = pdf.extract([
+    dict_obj['2'] = pdf.extract([
         parent,
         format,
-
         ('bandeira', f'{get}("517.8, 474.6, 543.747, 479.1")'),
         ('dias', f'{get}("523.15, 467.95, 538.383, 472.45")', lambda match: match.text()[:-4]),
     ])
 
-    schema['bandeiras']['3'] = pdf.extract([
+    dict_obj['3'] = pdf.extract([
         parent,
         format,
-
         ('bandeira', f'{get}("524.8, 461.3, 536.784, 465.8")'),
         ('dias', f'{get}("523.15, 454.65, 538.383, 459.15")', lambda match: match.text()[:-4]),
     ])
-
-    # remove dict vazíos
-    remover_chaves_vazias(dicionario=schema['bandeiras']['3'])
-    len_dict = len(schema['bandeiras']['3'])
+    remover_chaves_vazias(dict_obj['3'])
+    len_dict = len(dict_obj['3'])
     if not len_dict:
-        schema['bandeiras'].pop('3')
+        dict_obj.pop('3')
+    return dict_obj
 
-    schema['saldos_geracao'] = pdf.extract([
+
+def extrair_dados_saldos_geracao(pdf, get, parent, format):
+    obj = pdf.extract([
         parent,
         format,
-
         ('saldo_energia_instalacao', f'{get}("51.0, 245.239, 224.393, 250.739")', lambda match: match.text()[45:]),
         ('saldo_expirar_prox_mes', f'{get}("51.0, 237.939, 171.296, 243.439")',lambda match: match.text()[29:]),
         ('participacao_geracao', f'{get}("51.0, 230.639, 127.202, 236.139")', lambda match: match.text()[24:]),
     ])
 
     # saldo geracao, vazios e dados incorretos.
-    data = schema['saldos_geracao'].get('saldo_energia_instalacao')[-3:]
+    data = obj.get('saldo_energia_instalacao')[-3:]
     if data != 'kWh':
-        schema.pop('saldos_geracao')
+        return False
+    return obj
 
+
+def extrair_dados_historico(pdf, get, parent , format):
     list_historico = list()
     y0_historico, y1_historico = 351.995, 356.995
     altura_historico = y1_historico - y0_historico
@@ -208,17 +198,18 @@ for i, fatura in enumerate(faturas):
             ('kWh', f'{get}("156.05, {y0_historico}, 167.15, {y1_historico}")'),
             ('dias', f'{get}("178.645, {y0_historico}, 184.205, {y1_historico}")'),
         ])
-
         linha_vazia = not any([val != "" for val in obj.values()])
         if linha_vazia:
             break
         y0_historico = y0_historico - altura_historico - ajuste  # 482,2
         y1_historico = y1_historico - altura_historico - ajuste
         list_historico.append(obj)
-    schema['historico'] = formata_historico(list_historico)
+    return formata_historico(list_historico)
 
+
+def extrair_outros_dados(pdf, get, parent, format, pdf_pages):
     for page in range(len(pdf_pages.pages)):
-        schema['outros'] = pdf.extract([
+        obj = pdf.extract([
                 ('with_parent', f'LTPage[pageid="{page + 1}"]'),
                 format,
                 ('cod_debito_auto', f'{get}("321.45, 117.812, 374.826, 125.812")'),
@@ -226,19 +217,58 @@ for i, fatura in enumerate(faturas):
                 ('data_vencimento', f'{get}("504.9, 117.812, 544.868, 125.812")'),
                 ('codigo_barras', f'{get}("99.2, 58.057, 333.205, 66.557")'),
         ])
-
-    schema['outros']['debitos_antigos'] = pdf.extract([
+    obj['debitos_antigos'] = pdf.extract([
             parent,
             format,
             ('vencimento', f'{get}("51.0, 160.539, 118.942, 166.039")', lambda texto: texto.text()[:10]),
             ('valor', f'{get}("51.0, 160.539, 118.942, 166.039")', lambda texto: texto.text()[14:]),
     ])
-    schema['outros'] = format_outros(schema['outros'])
+    return format_outros(obj)
 
 
-    json_data = json.dumps(schema, indent=4, ensure_ascii=False, default=date_obj_json)  # noqa
+def processar_pdf(fatura):
+    pdf = pdfquery.PDFQuery(fatura)
+    pdf_name = os.path.basename(fatura)[0:-4]
+    pdf_pages = PyPDF2.PdfReader(fatura)
+
+    get = 'LTTextLineHorizontal:overlaps_bbox'
+    parent = ('with_parent', 'LTPage[pageid="1"]')
+    format = ('with_formatter', 'text')
+    schema = {
+        UNIDADE_CONSUMIDORA: {},
+        FATURA: {},
+        LEITURAS: {},
+        PRODUTOS: {},
+        BANDEIRAS: {},
+        SALDOS_GERACAO: {},
+        HISTORICO: {},
+        OUTROS: {}
+    }
+
+    # Extrair os dados
+    schema[UNIDADE_CONSUMIDORA] = extrair_dados_unidade_consumidora(pdf, get, format, parent)
+    schema[FATURA] = extrair_dados_fatura(pdf, get, format, parent, pdf_pages)
+    schema[LEITURAS] = extrair_dados_leituras(pdf, get, parent, format)
+    schema[PRODUTOS] = extrair_dados_produtos(pdf, get, parent, format, pdf_pages)
+    schema[BANDEIRAS] = extrair_dados_bandeiras(pdf, get, parent, format)
+    schema[SALDOS_GERACAO] = extrair_dados_saldos_geracao(pdf, get, format, parent)
+    schema[HISTORICO] = extrair_dados_historico(pdf, get, parent, format)
+    schema[OUTROS] = extrair_outros_dados(pdf, get, parent, format, pdf_pages)
+
+    json_data = json.dumps(schema, indent=4, ensure_ascii=False, default=date_obj_json)
     with open(f"./json/{pdf_name}.json", "w", encoding='utf-8') as arquivo:
         arquivo.write(json_data)
 
-print('')
-print(f'{len(faturas)} faturas processadas.')
+
+def main():
+    faturas = glob.glob('./faturas/' + "*.pdf")
+    for i, fatura in enumerate(faturas):
+        print(f'Processando: {i+1}', end='\r')
+        processar_pdf(fatura)
+
+    print('')
+    print(f'{len(faturas)} faturas processadas.')
+
+
+if __name__ == "__main__":
+    main()
