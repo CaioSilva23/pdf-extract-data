@@ -1,0 +1,6 @@
+venv/
+faturas/
+json/
+xml/
+*.json
+recicle/
